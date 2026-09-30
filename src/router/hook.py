@@ -17,6 +17,7 @@ never kills the hook first (print_zcode_hook_config below).
 from __future__ import annotations
 
 import argparse
+import functools
 import json
 import sys
 import time
@@ -106,8 +107,14 @@ def _run(stdin_json: str, config_path: Path) -> HookOutcome:
     state = jev.redact(_prompt_state(payload))
     catalog = Catalog(catalog_path)
     started = time.monotonic()
+    ask_bound = functools.partial(
+        jev.ask,
+        credential_ref=config.credential_ref,
+        timeout_ms=config.timeout_ms,
+        trace_path=config.state_path("trace.jsonl"),
+    )
     try:
-        result = pipeline.route(state, catalog, ask=jev.ask)
+        result = pipeline.route(state, catalog, ask=ask_bound)
     finally:
         catalog.close()
 

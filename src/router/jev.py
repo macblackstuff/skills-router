@@ -167,7 +167,12 @@ def _post_with_retry(body: dict, api_key: str, timeout_s: float) -> dict:
             if e.code in (429, 529) and attempt < _MAX_RETRIES:
                 time.sleep(_RETRY_BACKOFF_S * (2 ** attempt))
                 continue
-            raise JevError(f"Jev API HTTP {e.code}") from e
+            detail = ""
+            try:
+                detail = e.read().decode("utf-8", "replace")[:200]
+            except Exception:
+                pass
+            raise JevError(f"Jev API HTTP {e.code}: {detail}") from e
         except TimeoutError as e:
             raise JevTimeoutError(f"Jev API timed out after {timeout_s:.3f}s") from e
         except urllib.error.URLError as e:

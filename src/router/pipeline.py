@@ -81,12 +81,15 @@ def _triage(prompt_state: str, types: List[str], ask: Ask) -> Tuple[dict, List[s
     answers = ask(prompt_state, questions)
     verdicts: dict = {}
     passed: List[str] = []
+    # Triage is the recall stage: fan + gate own precision, so a type passes
+    # on any meaningful relevance signal (calibration placeholder per KTD2).
+    TRIAGE_PASS_P = 0.60
     for t in types:
         answer = answers[f"triage_{t}"]
         if not isinstance(answer, Noul):
             raise PipelineError(f"triage answer for {t!r} is not a Noul")
         verdicts[t] = act(answer.p)
-        if verdicts[t] == "act":
+        if answer.p >= TRIAGE_PASS_P:
             passed.append(t)
     return verdicts, passed
 
@@ -119,6 +122,10 @@ def _fan_question(group: list) -> Tuple[str, dict]:
                 seen.add(rid)
                 ids.append(rid)
     subject = f"{t0} capability" if len({t for t, _ in group}) == 1 else "capability"
+    # Choice criteria is an object map (id -> one-line label), per the verified
+    # systemone contract; a list here returns HTTP 422.
+    id_lines = shard_text_id_map(group, seen)
+    id_lines[NONE] = "no match — none of these options fits"
     return qid, {
         "type": "choice",
         "instructions": (
@@ -126,8 +133,19 @@ def _fan_question(group: list) -> Tuple[str, dict]:
             f"'id | name | description' lines:\n" + "\n".join(texts)
             + f"\nPick '{NONE}' if none matches."
         ),
-        "criteria": ids + [NONE],
+        "criteria": id_lines,
     }
+
+
+def shard_text_id_map(group: list, seen: set) -> Dict[str, str]:
+    """Map every option id in the group to a one-line label from shard text."""
+    mapping: Dict[str, str] = {}
+    for _t, shard in group:
+        for line in shard["text"].splitlines():
+            parts = [p.strip() for p in line.split("|", 2)]
+            if len(parts) >= 2 and parts[0]:
+                mapping[parts[0]] = " — ".join(p for p in parts[1:3] if p)[:120]
+    return mapping
 
 
 def _fan(
@@ -214,7 +232,7 @@ def _gate(
             "type": "choice",
             "instructions": "Which capabilities should actually be injected "
             "into the agent turn for this prompt?",
-            "criteria": list(winners) + [NONE],
+            "criteria": {**{k: k for k in winners}, NONE: "no match — inject nothing"},
         },
         GATE_CAPTURE_QID: {
             "type": "noul",
