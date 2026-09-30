@@ -75,9 +75,15 @@ Today 227 skill directories sit across `~/.zcode/skills` and `~/.agents/skills`,
 - F4. Self-improvement
   - **Trigger:** Nightly judge run.
   - **Actors:** A3
-  - **Steps:** Telemetry + transcripts scanned for pointer usage → Jev Score judges outcomes → descriptor/trigger tuning written to catalog → results logged with rationale.
+  - **Steps:** Telemetry + transcripts scanned for pointer usage → Jev Score judges outcomes → descriptor/trigger tuning written to catalog → fingerprint + payloads rebuilt → results logged with rationale.
   - **Outcome:** Routing quality improves without manual retuning.
   - **Covers R11.**
+- F5. Learning capture
+  - **Trigger:** Gate output carries a candidate learning (same Jev call, one extra question).
+  - **Actors:** A3, A4
+  - **Steps:** Candidate appended to `captures/pending.jsonl` → drainer judges each → draft written to matching source tree (or `captures/drafts/` pending review) → `router index` rebuilds catalog + fingerprint → caches invalidate → git sync.
+  - **Outcome:** New capabilities, rules, models, and learnings become routable without hand-editing the catalog.
+  - **Covers R13.**
 
 ### Requirements
 
@@ -106,7 +112,8 @@ Today 227 skill directories sit across `~/.zcode/skills` and `~/.agents/skills`,
 **Distribution, sync, evals**
 
 - R11. Evals cover depth 1-3: golden set (hit@1/hit@3 vs ZCode-native skill triggering baseline, majority-of-3 sampling), per-turn telemetry (latency, cost, injection size), and session-trace replay; a nightly Jev Score judge turns outcome logs into descriptor tuning.
-- R12. Install via `npx skills add <owner/repo>` (Vercel Agent Skills Directory layout); bootstrap registers ZCode hooks and triggers first index run; the repo (catalog included) syncs across devices by git with automatic push.
+- R12. Install via `npx skills add <owner/repo>` (Vercel Agent Skills Directory layout); bootstrap registers ZCode hooks and triggers first index run; the repo (code and accepted captures) syncs across devices by git with automatic push.
+- R13. Learning capture: every turn, Jev flags candidate learnings (unknown capability mentioned, rule candidate, absent model, worth-keeping insight) into a pending queue; a capture drainer judges and drafts file additions to the matching source tree (skill stub, rules-file section, roster entry, new-type source dir); accepted drafts reindex and sync. The catalog is always derived from source files — nothing enters the database except through the indexer.
 
 ### Acceptance Examples
 
@@ -174,6 +181,8 @@ Product Contract preservation: changed R1 — v1 ZCode-only (owner ruling 2026-0
 - KTD9. **Packaging**: the runtime ships self-contained inside the skill directory (`skills/router/` carries package + bootstrap) so `npx skills add` delivers everything it needs; git clone remains the primary install for development, `npx skills add` the discovery/wrapper path. Bootstrap registers the ZCode hook block (with `timeoutMs` per KTD4), runs the first index, snapshots the harness config before editing (prints diff; `router uninstall` restores), and registers a nightly scheduler entry (launchd/cron) invoking the judge. Catalog and state are per-device and gitignored — each device rebuilds from local sources (repo carries code only); post-commit auto-push covers code. Exact skills.sh manifest spec verified at build against the `npx skills` CLI. Governs R12.
 - KTD10. **Evals**: pytest suite; golden set JSONL (prompt, expected capability ids) split into a calibration partition and a held-out partition — the sweep tunes on calibration, the ≥-baseline gate scores held-out only; baseline = ZCode-native triggering elicited and scored by a documented harness on the same prompts; every prompt run 3×, majority vote, variance reported; the gate requires ≥ baseline by a stated margin (default: outside the majority-vote variance). Governs R11.
 
+- KTD11. **Learning capture**: per-turn gate question ("any candidate learning?") appends to `captures/pending.jsonl`; `router capture` drains — Jev Score judges each candidate, drafts the file addition (skill stub, rule section, roster line, new-type source dir), writes to `captures/drafts/` for review or directly to the source tree per config; `router index` runs after apply. The catalog is derived-only: no writer inserts rows outside the indexer. Governs R13.
+
 ### High-Level Technical Design
 
 ```mermaid
@@ -232,6 +241,8 @@ Unit index:
 | U11 | Nightly judge + tuning | `src/router/judge.py` | U10 |
 | U12 | Packaging + bootstrap + auto-push | `skills/router/`, `scripts/` | U5 |
 | U13 | Context slim-down, ZCode-scoped | `docs/slim-down.md`, `src/router/cli.py` | U5 |
+| U14 | Per-turn learning capture | `src/router/capture.py` | U4 |
+| U15 | Capture drainer | `src/router/drainer.py`, `src/router/cli.py` | U14, U2 |
 
 ### U1. Scaffold, config, catalog schema
 
@@ -364,6 +375,27 @@ Unit index:
 - **Execution note:** verification is a live-session smoke, not unit coverage.
 - **Test scenarios:** dry-run reports counts without changing files; apply reduces ZCode-scoped surfaces; restore returns originals; shared AGENTS.md untouched.
 - **Verification:** real ZCode session runs with skeleton surfaces; routing supplies capabilities.
+
+### U14. Per-turn learning capture
+
+- **Goal:** Turn-level learnings and capability mentions queued, not lost.
+- **Requirements:** R13.
+- **Dependencies:** U4.
+- **Files:** `src/router/capture.py`, `tests/test_capture.py`.
+- **Approach:** per KTD11 — one extra gate question; candidates appended to `captures/pending.jsonl`; zero mid-turn source writes; queue entry carries turn context for the drainer.
+- **Test scenarios:** unknown skill mentioned → queue entry with context; rule-shaped instruction ("always X") → candidate typed `rule`; no candidates → no queue write; queue append fails → block-with-notice path (KTD4).
+- **Verification:** `pytest tests/test_capture.py` green; live turn mentioning a new tool produces a queue entry.
+
+### U15. Capture drainer
+
+- **Goal:** Queued learnings become routable capabilities/rules/roster entries.
+- **Requirements:** R13.
+- **Dependencies:** U14, U2.
+- **Files:** `src/router/drainer.py`, `src/router/cli.py` (`router capture`), `tests/test_drainer.py`.
+- **Approach:** per KTD11 — Jev Score judges each pending capture; drafts written to `captures/drafts/` (review mode) or source tree (auto mode, per config); every apply runs `router index`; new type = new source dir + auto-table via indexer.
+- **Test scenarios:** skill-shaped capture → SKILL.md stub drafted; rule capture → rules-file section drafted with type mapping; roster capture → roster line; new-type capture → source dir created, indexer auto-creates table; review mode never writes sources directly; apply triggers reindex + fingerprint change.
+- **Verification:** one queued capture flows file → index → routable pointer in the next turn.
+
 
 
 ---
