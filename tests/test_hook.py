@@ -351,5 +351,6 @@ def test_print_zcode_hook_config(tmp_path, capsys):
 
     doc = json.loads(capsys.readouterr().out)
     entry = doc["hooks"]["events"]["UserPromptSubmit"][0]
-    assert entry["command"] == f"python3 -m router.hook --config {cfg}"
+    assert entry["command"].startswith("PYTHONPATH=")
+    assert entry["command"].endswith(f"python3 -m router.hook --config {cfg}")
     assert entry["timeoutMs"] == 45000  # >= Jev 30s timeout per KTD4
