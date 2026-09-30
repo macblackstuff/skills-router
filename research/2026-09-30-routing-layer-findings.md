@@ -45,7 +45,7 @@ Injection = hook mechanism (user's Claude precedent: rule-router.py → addition
 | D10 | Install via Vercel skills method (`npx skills add`) + bootstrap registers hooks | bespoke installer | distribution solved, ~20 platforms |
 | D11 | Repo synced by git with automatic push | Syncthing | versioned, estate pattern |
 | D12 | Evals full depth 1-3 + self-improving feedback loop | partial evals | loop covers replay (L3) |
-| D13 | Harnesses v1: zcode + codex | + claude, kimi | user pick; Kimi adapters exist (context-mode plugin), later |
+| D13 | Harnesses v1: ZCode ONLY; more harnesses (codex, claude, kimi) after success (user 2026-09-30: "for v1, we will only focus on ZCode") | zcode + codex both in v1 | user ruling — prove on one first |
 
 ## 4. v1 types (SETTLED — full coverage)
 
