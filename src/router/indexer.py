@@ -15,7 +15,19 @@ Custom types index without code change: declare in the router TOML
 
     [sources.types.<name>]
     adapter = "skills" | "rules" | "knowledge" | "roster"
+           | "plugins" | "agents" | "memories" | "mcp"
     dirs = ["/path", ...]     # or path = "/file.md" for roster
+
+Tuning sidecars (U11/R11): <state_dir>/tuning/*.toml (written by the nightly
+judge) override row fields at index time — the catalog stays derived-only and
+a recreate migration re-applies them from the files:
+
+    capability_id = "..."
+    [[override]]
+    field = "description" | "trigger_terms"
+    old = "..."   # skipped when it no longer matches the source row
+    new = "..."
+    rationale = "..."
 
 CLI: python3 -m router.indexer --config <path>
 """
@@ -29,9 +41,14 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from router import discovery
 from router.catalog import Catalog
 from router.config import ConfigError, RouterConfig
+from router.sources import agents as agents_source
 from router.sources import knowledge as knowledge_source
+from router.sources import mcp as mcp_source
+from router.sources import memories as memories_source
+from router.sources import plugins as plugins_source
 from router.sources import roster as roster_source
 from router.sources import rules as rules_source
 from router.sources import skills as skills_source
@@ -78,6 +95,10 @@ _ADAPTERS = {
     "rules": lambda spec, t: rules_source.iter_rows(list(spec.get("dirs", [])), type_name=t),
     "knowledge": lambda spec, t: knowledge_source.iter_rows(list(spec.get("dirs", [])), type_name=t),
     "roster": lambda spec, t: roster_source.iter_rows(spec["path"], type_name=t),
+    "plugins": lambda spec, t: plugins_source.iter_rows(list(spec.get("dirs", [])), type_name=t),
+    "agents": lambda spec, t: agents_source.iter_rows(list(spec.get("dirs", [])), type_name=t),
+    "memories": lambda spec, t: memories_source.iter_rows(list(spec.get("dirs", [])), type_name=t),
+    "mcp": lambda spec, t: mcp_source.iter_rows(list(spec.get("dirs", [])), type_name=t),
 }
 
 
@@ -95,6 +116,61 @@ def load_custom_sources(config_path: Path | str) -> dict[str, list[dict]]:
             raise IndexerError(f"unknown adapter {adapter!r} for custom type {type_name!r}")
         out[type_name] = _ADAPTERS[adapter](spec, type_name)
     return out
+
+
+# -- tuning sidecar merge (U11/R11) -------------------------------------------------
+
+TUNING_FIELDS = ("description", "trigger_terms")
+
+
+def load_tuning(tuning_dir: Path | str | None) -> dict[str, list[dict]]:
+    """Read tuning/*.toml sidecars -> {capability_id: [override, ...]}."""
+    if not tuning_dir:
+        return {}
+    d = Path(tuning_dir).expanduser()
+    if not d.is_dir():
+        return {}
+    out: dict[str, list[dict]] = {}
+    for f in sorted(d.glob("*.toml")):
+        try:
+            data = tomllib.loads(f.read_text(encoding="utf-8"))
+        except (OSError, tomllib.TOMLDecodeError) as e:
+            print(f"router index: tuning {f.name} unreadable ({e})", file=sys.stderr)
+            continue
+        cid = str(data.get("capability_id", "")).strip()
+        overrides = data.get("override", [])
+        if cid and isinstance(overrides, list):
+            out.setdefault(cid, []).extend(o for o in overrides if isinstance(o, dict))
+    return out
+
+
+def apply_tuning(rows: list[dict], overrides: dict[str, list[dict]]) -> int:
+    """Apply field overrides to matching rows in place; returns applied count.
+
+    An override whose ``old`` no longer matches the row (source changed since
+    the proposal) is skipped — tuning must never clobber a fresh source edit.
+    """
+    by_id = {r["id"]: r for r in rows}
+    applied = 0
+    for cid, items in overrides.items():
+        row = by_id.get(cid)
+        if row is None:
+            continue
+        for o in items:
+            fld = str(o.get("field", ""))
+            if fld not in TUNING_FIELDS:
+                continue
+            old = o.get("old")
+            if old is not None and str(old) != str(row.get(fld, "")):
+                print(
+                    f"router index: tuning override for {cid}.{fld} skipped "
+                    "(old value no longer matches source)",
+                    file=sys.stderr,
+                )
+                continue
+            row[fld] = str(o.get("new", ""))
+            applied += 1
+    return applied
 
 
 # -- dedupe (G18) ---------------------------------------------------------------
@@ -210,8 +286,17 @@ def run_index(config: RouterConfig, catalog: Catalog | None = None,
               custom_sources: dict[str, list[dict]] | None = None,
               budget_tokens: int = BUDGET_TOKENS,
               chars_per_token: int = CHARS_PER_TOKEN,
-              overlap_fraction: float = OVERLAP_FRACTION) -> IndexResult:
+              overlap_fraction: float = OVERLAP_FRACTION,
+              tuning_dir: Path | str | None = None) -> IndexResult:
     rows_by_type = collect_rows(config, custom_sources)
+    # U11 tuning sidecars (default <state_dir>/tuning): applied before dedupe
+    # so overrides flow into rows, descriptors and the fingerprint.
+    overrides = load_tuning(
+        config.state_path("tuning") if tuning_dir is None else tuning_dir
+    )
+    if overrides:
+        for type_rows in rows_by_type.values():
+            apply_tuning(type_rows, overrides)
     own = catalog is None
     if own:
         state = config.state_path("catalog.db")
@@ -248,6 +333,12 @@ def run_index(config: RouterConfig, catalog: Catalog | None = None,
         (FINGERPRINT_KEY, result.fingerprint),
     )
     catalog.db.commit()
+    # Roster auto-discovery (U9/R10): additive, after the fingerprint so it
+    # never affects the catalog itself.
+    try:
+        discovery.scan(config)
+    except Exception as e:  # scan() never raises; belt and braces
+        print(f"router index: discovery failed ({type(e).__name__}: {e})", file=sys.stderr)
     if own:
         catalog.close()
     return result
