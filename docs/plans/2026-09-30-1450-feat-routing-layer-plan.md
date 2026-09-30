@@ -12,7 +12,7 @@ origin: research/2026-09-30-routing-layer-findings.md
 
 ## Goal Capsule
 
-- **Objective:** Coding agents receive, at every turn, only the capabilities, knowledge, models, file locations, and rules their current task needs — delivered by a Jev-decided routing layer outside agent context — so agent context stays lean and agent inference stays on the task.
+- **Objective:** Coding agents receive, at every turn, only the capabilities, knowledge, models, file locations, and rules their current task needs, so agent context stays lean and agent inference stays on the task.
 - **Means:** Hook-triggered Python routing layer with parallel Jev workers and a typed SQLite catalog (KTD1, KTD4).
 - **Product authority:** Full v1 scope confirmed by owner 2026-09-30 (findings `research/2026-09-30-routing-layer-findings.md`). Nothing deferred inside v1 scope; ZCode is the only v1 harness per owner ruling.
 - **Stop conditions:** None open. Research items (shard calibration, relations vocabulary) resolve inside build.
@@ -101,7 +101,7 @@ Today 227 skill directories sit across `~/.zcode/skills` and `~/.agents/skills`,
 
 **Sources and roster**
 
-- R10. Sources: 227 local skill dirs, vault rules (`resources/rules/` + AGENTS.md skeleton), brain vaults (read-only), and a model roster covering all models including non-harness ones (Jev, Voyager, subscriptions). The hook detects models named in prompts but absent from the roster and flags roster addition. External source roots are configured, not hardcoded.
+- R10. Sources: 227 local skill dirs, vault rules (`resources/rules/` + AGENTS.md skeleton), brain vaults (read-only), and a model roster covering all models including non-harness ones (Jev, Voyager, subscriptions). The router records models named in prompts but absent from the roster; the roster flag surfaces on the next index run. External source roots are configured, not hardcoded.
 
 **Distribution, sync, evals**
 
@@ -120,7 +120,7 @@ Today 227 skill directories sit across `~/.zcode/skills` and `~/.agents/skills`,
 ### Success Criteria
 
 - Agent-context bytes drop: static skill lists and AGENTS.md reduce to skeletons; routing replaces dumping.
-- Routing accuracy beats ZCode-native skill triggering on the golden set (hit@1, majority-of-3).
+- Routing accuracy meets or beats ZCode-native skill triggering on the golden set (hit@1, majority-of-3, held-out split per KTD10).
 - Per-turn added latency under ~1s uncached, under ~50ms cached; cost under ~$0.001/turn.
 - Fewer agent steps per task (routing removes capability-hunting turns).
 
@@ -165,14 +165,14 @@ Product Contract preservation: changed R1 — v1 ZCode-only (owner ruling 2026-0
 
 - KTD1. **Runtime: Python 3 stdlib + asyncio.** (session-settled: user-approved — chosen over Bun/TypeScript: zero-dependency OSS story; sqlite3 and asyncio in-box, typesafe-sdk is Python-native.) Governs R2, R3.
 - KTD2. **Jev client adopted from jev-implementations `jev.py` shape**: one `ask(state, questions)` fan-out wrapper, typed Noul/Choice/Score answers, JSONL trace (state, questions, answers, usage, latency, cost), threshold policy in code (`p ≥ 0.95` act · `p ≤ 0.05` skip · else escalate), confidence `(n × p_max − 1)/(n − 1)`, retries on 429/529. Governs R2.
-- KTD3. **Catalog schema**: one SQLite file; per-type tables share a core column contract (R4 lists it); custom types auto-create tables from the same contract; `relations(from_id, to_id, kind)` with a small seed vocabulary (depends_on, related_to, conflicts_with, supersedes) — final vocabulary confirmed at build. Governs R4.
-- KTD4. **Hook mechanism**: single Python script invoked by ZCode UserPromptSubmit; reads JSON payload from stdin; prints `additionalContext` JSON to stdout; no daemon, no background process. Blocking behavior falls out of synchronous hook execution. Governs R1, R9.
-- KTD5. **Override**: `router off` / `router on` CLI flips `routing_enabled` in a YAML router config; the blocking notice prints the exact command; config also holds source roots, Jev settings, timeout. Governs R9.
+- KTD3. **Catalog schema**: one SQLite file; per-type tables share a core column contract (R4 lists it); custom types auto-create tables from the same contract; `relations(from_id, to_id, kind)` exists as schema but is index-only and reserved for post-v1 consumers — no relation-extraction effort in v1 beyond what sources give free (Obsidian links). Governs R4.
+- KTD4. **Hook mechanism**: single Python script invoked by ZCode UserPromptSubmit; reads JSON payload from stdin; successful routing prints `additionalContext` JSON to stdout (exit 0); no daemon. **Blocking** = exit code 2 (or `decision: "block"`) with the `router off` notice as the block reason on stderr — `additionalContext` never blocks (requires exit 0). ZCode hook `timeoutMs` is registered ≥ the router's Jev timeout so the harness never kills the hook first. Any routing-layer failure (Jev unreachable, router exception, corrupt state, locked catalog) takes the same block-with-notice path; catalog uses WAL + busy-timeout; corrupt session state rebuilds rather than crashes. Governs R1, R9.
+- KTD5. **Override and config**: `router off` / `router on` CLI flips `routing_enabled` in a TOML router config (stdlib `tomllib`); the blocking notice names the exact command; config holds source roots, Jev settings, timeout, `routing_enabled`. The Jev API key never lives in config or repo — config carries a credential reference (env var name or `op://` path), resolved at startup with process-lifetime caching. Governs R9.
 - KTD6. **Session memory**: per-session JSONL file under a router state dir; entries = turn digest + injected set + active-set with turn-count decay; transcript tail (last-K) read from the path in the hook payload. Governs R7.
-- KTD7. **Caches**: SQLite tables in the catalog file — `verdict_cache(prompt_fingerprint, catalog_fingerprint, verdict_json, ts)` and `negative_cache(prompt_fingerprint, catalog_fingerprint, ts)`; fingerprints = SHA-256 of normalized prompt+memory digest / catalog contents. Governs R8.
-- KTD8. **Knowledge map**: knowledge table stores page→section rows (page, section, heading path, summary line, body offset); indexer builds outlines by heading scan; gate output for knowledge carries section text read at inject time — verbatim, no summarizer. Governs R6.
-- KTD9. **Packaging**: repo in Vercel Agent Skills layout (skill wrapper + installable bootstrap); bootstrap registers the ZCode hook config block and runs the first index; git post-commit hook auto-pushes. Exact skills.sh manifest spec verified at build against the `npx skills` CLI. Governs R12.
-- KTD10. **Evals**: pytest suite; golden set JSONL (prompt, expected capability ids); baseline = ZCode-native triggering measured over the same prompts; every prompt run 3×, majority vote, variance reported; calibration sweep iterates shard budget × options-per-shard. Governs R11.
+- KTD7. **Caches**: SQLite tables in the catalog file — `verdict_cache(prompt_fingerprint, catalog_fingerprint, verdict_json, ts)` and `negative_cache(prompt_fingerprint, catalog_fingerprint, ts)`; verdict key = normalized prompt + catalog fingerprint only (session memory excluded from the key — it mutates every turn and would defeat replay; staleness handled at inject time against the active-set). Cache hit-rate is a telemetry field with a target; expected hit regime is cross-session cold-start repeats. Governs R8.
+- KTD8. **Knowledge map**: knowledge table stores page→section rows (page, section, heading path, summary line) with the section body text captured in the catalog at index time (plus a source content hash for drift detection) — inject reads from the catalog, never live-file offsets; verbatim, no summarizer. Governs R6.
+- KTD9. **Packaging**: the runtime ships self-contained inside the skill directory (`skills/router/` carries package + bootstrap) so `npx skills add` delivers everything it needs; git clone remains the primary install for development, `npx skills add` the discovery/wrapper path. Bootstrap registers the ZCode hook block (with `timeoutMs` per KTD4), runs the first index, snapshots the harness config before editing (prints diff; `router uninstall` restores), and registers a nightly scheduler entry (launchd/cron) invoking the judge. Catalog and state are per-device and gitignored — each device rebuilds from local sources (repo carries code only); post-commit auto-push covers code. Exact skills.sh manifest spec verified at build against the `npx skills` CLI. Governs R12.
+- KTD10. **Evals**: pytest suite; golden set JSONL (prompt, expected capability ids) split into a calibration partition and a held-out partition — the sweep tunes on calibration, the ≥-baseline gate scores held-out only; baseline = ZCode-native triggering elicited and scored by a documented harness on the same prompts; every prompt run 3×, majority vote, variance reported; the gate requires ≥ baseline by a stated margin (default: outside the majority-vote variance). Governs R11.
 
 ### High-Level Technical Design
 
@@ -204,7 +204,8 @@ flowchart TB
 - ZCode stays the only harness until owner declares success.
 - Golden set seeds at 20-30 prompts (jev-implementations 20-case pattern), grows with replayed traces.
 - External source roots (skill dirs, vault, roster) resolved from router config at runtime; nothing hardcoded.
-- Jev latency ~0.3s/call holds; three sequential Jev layers ≈ 700-900ms/turn uncached.
+- Latency budget is per-stage with p95 targets: interpreter + I/O overhead ≤150ms, each Jev layer p95 ≤400ms, fan measured at slowest worker; the default Jev timeout derives from measured p95, not the 0.3s mean, and spans retry backoff. Uncached <1s and cached gates are restated per stage in the Verification Contract.
+- Per-turn cost basis: ~$0.0003 per Jev call at ~7k state tokens ($0.042/1M input); a per-turn worker ceiling (default 6) keeps cost inside the gate, and the catalog-size crossover to hierarchical (beam) recall is stated when the ceiling binds.
 
 ### Sequencing
 
@@ -220,16 +221,17 @@ Unit index:
 |---|---|---|---|
 | U1 | Scaffold + config + catalog schema | `pyproject.toml`, `src/router/config.py`, `src/router/catalog.py` | — |
 | U2 | Indexer | `src/router/indexer.py`, `src/router/sources/` | U1 |
-| U3 | Jev client + gates + trace | `src/router/jev.py`, `src/router/gates.py` | U1 |
+| U3 | Jev client, thresholds, trace | `src/router/jev.py`, `src/router/thresholds.py` | U1 |
 | U4 | Triage, shards, fan, gate | `src/router/pipeline.py` | U2, U3 |
 | U5 | ZCode hook adapter + blocking + `router off` | `src/router/hook.py`, `src/router/cli.py` | U4 |
 | U6 | Session memory + active-set | `src/router/memory.py` | U5 |
-| U7 | Verdict + negative caches | `src/router/caches.py` | U4 |
+| U7 | Verdict + negative caches | `src/router/caches.py` | U4, U6 |
 | U8 | Knowledge map + section inject | `src/router/knowledge.py` | U2, U4 |
 | U9 | Roster, rules, AGENTS.md, remaining types | `src/router/sources/` | U2 |
 | U10 | Golden set + telemetry + baseline + sweep | `tests/golden/`, `src/router/evals.py` | U5 |
 | U11 | Nightly judge + tuning | `src/router/judge.py` | U10 |
-| U12 | Packaging + bootstrap + auto-push | `skills/`, `scripts/bootstrap.py` | U5 |
+| U12 | Packaging + bootstrap + auto-push | `skills/router/`, `scripts/` | U5 |
+| U13 | Context slim-down, ZCode-scoped | `docs/slim-down.md`, `src/router/cli.py` | U5 |
 
 ### U1. Scaffold, config, catalog schema
 
@@ -251,12 +253,12 @@ Unit index:
 - **Test scenarios:** skill dir with dupes merges to newest + alias row; fingerprint changes on source edit; shards respect 2-4k token budget with ~10% overlap; custom-type source indexes without code change.
 - **Verification:** `router index` over `~/.zcode/skills` yields ~125 rows; `pytest tests/test_indexer.py` green.
 
-### U3. Jev client, typed gates, trace
+### U3. Jev client, threshold policy, trace
 
 - **Goal:** One-call Jev access with thresholds and trace, adopted from jev-implementations.
 - **Requirements:** R2.
 - **Dependencies:** U1.
-- **Files:** `src/router/jev.py`, `src/router/gates.py`, `tests/test_jev.py`.
+- **Files:** `src/router/jev.py`, `src/router/thresholds.py`, `tests/test_jev.py`.
 - **Approach:** per KTD2 — fan-out wrapper over `typesafe-sdk` (or raw POST with retry on 429/529), typed answers, JSONL trace, threshold policy, confidence formula; no seed exists (verified) so gates expose `resample(n)` helper.
 - **Test scenarios:** mock API returns typed Noul/Choice/Score and trace logs usage+latency; 429 retries then succeeds; timeout raises typed error consumed by U5 blocking path; confidence formula matches `(n × p_max − 1)/(n − 1)`.
 - **Verification:** `pytest tests/test_jev.py` green; one real API smoke call logged.
@@ -278,7 +280,7 @@ Unit index:
 - **Dependencies:** U4.
 - **Files:** `src/router/hook.py`, `src/router/cli.py`, `tests/test_hook.py`.
 - **Approach:** per KTD4/KTD5 — stdin JSON payload, stdout `additionalContext`; pointer format per R5; Jev failure or timeout → block with notice naming `router off`; CLI flips `routing_enabled` in config; adopted ZCode hook registration from jev-implementations Phase 4 evidence.
-- **Test scenarios:** payload → additionalContext JSON with pointer line (Covers AE1); Jev timeout → blocking notice names command, no injection (Covers AE5); `router off` then turn proceeds unrouted; `router on` restores (Covers AE5); malformed payload fails safe.
+- **Test scenarios:** payload → additionalContext JSON with pointer line, exit 0 (Covers AE1); Jev timeout → exit 2 block with `router off` reason on stderr, no additionalContext (Covers AE5); live spike: verify the blocked-notice renders to the user on a real blocked prompt before U6+ build on it; `router off` then turn proceeds unrouted; `router on` restores (Covers AE5); malformed payload → block-with-notice, fail-closed consistent with R9; router exception → block-with-notice, not a crash.
 - **Verification:** live ZCode session shows injected pointer mid-turn.
 
 ### U6. Session memory, active-set
@@ -316,8 +318,8 @@ Unit index:
 - **Goal:** All nine types + roster auto-discovery live.
 - **Requirements:** R4, R10.
 - **Dependencies:** U2.
-- **Files:** `src/router/sources/roster.py`, `src/router/sources/rules.py`, `src/router/discovery.py`, `tests/test_sources_types.py`.
-- **Approach:** roster = owner-maintained markdown (all models incl. Jev, Voyager, subscriptions); hook flags models named in prompts but absent (Covers AE6); rules + AGENTS.md sections typed as rule rows; plugin/agent/memory/MCP sources from configured roots.
+- **Files:** `src/router/sources/plugins.py`, `src/router/sources/agents.py`, `src/router/sources/memories.py`, `src/router/sources/mcp.py`, `src/router/discovery.py`, `tests/test_sources_types.py` (roster/rules adapters extend in place from U2).
+- **Approach:** roster = owner-maintained markdown (all models incl. Jev, Voyager, subscriptions); discovery scans session transcripts at index time for models named but absent from the roster and records the flag (Covers AE6); rules + AGENTS.md sections typed as rule rows; plugin/agent/memory/MCP sources from configured roots; custom types are schema-only until a source is configured.
 - **Test scenarios:** unknown model in prompt → roster flag on next index (Covers AE6); AGENTS.md section becomes rule rows; custom type end-to-end.
 - **Verification:** `router index` populates all type tables from configured sources.
 
@@ -337,7 +339,7 @@ Unit index:
 - **Requirements:** R11.
 - **Dependencies:** U10.
 - **Files:** `src/router/judge.py`, `tests/test_judge.py`.
-- **Approach:** scan telemetry + transcripts for pointer usage; Jev Score judges each routed turn; write descriptor/trigger-term tuning with rationale to catalog; log every change.
+- **Approach:** scan telemetry + transcripts for pointer usage; Jev Score judges each routed turn; write descriptor/trigger-term tuning with rationale to catalog; **every catalog writer recomputes the fingerprint and rebuilds affected precomputed payloads — the judge's final step invokes `router index`** so tuning actually affects routing; log every change.
 - **Test scenarios:** used-pointer turns score higher than ignored ones; judge writes a tuning with rationale; no-telemetry night is a no-op.
 - **Verification:** one judge run over real week-one logs writes ≥1 documented tuning.
 
@@ -352,20 +354,32 @@ Unit index:
 - **Test scenarios:** bootstrap on clean clone registers hook + builds catalog; post-commit pushes when remote set; no remote → clean no-op.
 - **Verification:** second-machine clone + `npx skills add` + bootstrap → routed turn works.
 
+### U13. Context slim-down, ZCode-scoped
+
+- **Goal:** Byte-drop success criterion delivered: static skill list and ZCode-scoped instruction surfaces become skeletons; routing replaces dumping.
+- **Requirements:** Success Criteria (agent-context bytes drop), R1 (ZCode-only boundary).
+- **Dependencies:** U5.
+- **Files:** `docs/slim-down.md` (runbook), `src/router/cli.py` (`router slim` dry-run + apply).
+- **Approach:** enumerate ZCode-scoped surfaces only — `~/.zcode/skills` static list usage, ZCode-scoped instruction files; shared/vault-level AGENTS.md files explicitly out of scope until multi-harness adapters exist (other agents still read them). Dry-run prints before/after byte counts; apply writes skeletons and records originals for restore.
+- **Execution note:** verification is a live-session smoke, not unit coverage.
+- **Test scenarios:** dry-run reports counts without changing files; apply reduces ZCode-scoped surfaces; restore returns originals; shared AGENTS.md untouched.
+- **Verification:** real ZCode session runs with skeleton surfaces; routing supplies capabilities.
+
+
 ---
 
 ## Verification Contract
 
 - Unit + integration: `pytest` (all `tests/`).
-- Live smoke: one real ZCode turn showing injected pointer; one killed-key turn showing block + `router off` recovery.
-- Eval gate: `python -m router.evals` — hit@1 (majority-of-3) ≥ ZCode-native baseline on the golden set.
-- Performance gate: uncached turn <1s added wall time; cached replay <50ms; cost <$0.001/turn from trace log.
-- Calibration gate: sweep report names adopted shard budget.
+- Live smoke: one real ZCode turn showing injected pointer; one killed-key turn blocked via exit 2 with rendered `router off` notice; `router on` restores.
+- Eval gate: `python -m router.evals` — hit@1 (majority-of-3, held-out split) ≥ ZCode-native baseline by the stated margin.
+- Performance gates (per stage, p95): interpreter + I/O overhead ≤150ms; each Jev layer ≤400ms; fan at slowest worker; uncached turn total <1s added wall time; cached routing logic <100ms after interpreter start; cost <$0.001/turn from trace log at the per-turn worker ceiling.
+- Calibration gate: sweep report (calibration partition) names adopted shard budget; held-out scored once.
 
 ## Definition of Done
 
-- All twelve units land with their verifications green.
-- Static skill list and AGENTS.md slimmed to skeletons in a real session; routing replaces dumping (Success Criteria, byte-drop).
-- Blocking path proven live; `router on` restores.
+- All thirteen units land with their verifications green.
+- U13 slim-down: static skill list and ZCode-scoped instruction surfaces reduced to skeletons in a real session (shared/vault-level AGENTS.md files untouched until multi-harness adapters exist); routing replaces dumping.
+- Blocking path proven live via exit-2 spike; `router on` restores.
 - Eval + performance + calibration gates pass.
 - Abandoned-attempt code removed; no dead experiments in the diff; all work committed and pushed.
