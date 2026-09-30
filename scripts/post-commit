@@ -1,0 +1,8 @@
+#!/bin/sh
+# U12 post-commit auto-push (KTD9): push code after each commit.
+# No git remote configured -> clean no-op. Push failure never fails the commit.
+remote="$(git remote 2>/dev/null | head -n 1)"
+if [ -z "$remote" ]; then
+  exit 0
+fi
+git push "$remote" HEAD >/dev/null 2>&1 || true
