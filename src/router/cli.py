@@ -12,7 +12,7 @@ import re
 import sys
 from pathlib import Path
 
-from router import indexer
+from router import drainer, indexer
 from router.catalog import Catalog
 from router.config import ConfigError, RouterConfig
 from router.hook import DEFAULT_CONFIG, print_zcode_hook_config
@@ -109,6 +109,22 @@ def _cmd_status(config: RouterConfig, config_path: Path) -> int:
     return 0
 
 
+def _cmd_capture(config: RouterConfig, config_path: Path) -> int:
+    """Drain the pending capture queue (KTD11): Jev-scored, drafted, logged."""
+    result = drainer.drain(config, config_path=config_path)
+    if result.error:
+        print(f"error: {result.error}", file=sys.stderr)
+        return 2
+    print(
+        f"capture: judged {result.judged}, accepted {result.accepted}, "
+        f"discarded {result.discarded}, duplicates {result.duplicates}, "
+        f"reindexed {'yes' if result.reindexed else 'no'}"
+    )
+    for draft in result.drafts:
+        print(f"draft {draft}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="router.cli",
@@ -121,6 +137,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("on", help="re-enable routing")
     p_index = sub.add_parser("index", help="rebuild the catalog from configured sources")
     sub.add_parser("status", help="show routing_enabled, catalog fingerprint, row counts")
+    sub.add_parser("capture", help="drain the pending capture queue (review-mode drafts or auto apply + reindex)")
     sub.add_parser("hook-config", help="print the ZCode hook registration JSON block")
     args, extras = parser.parse_known_args(argv)
     config_path = Path(args.config).expanduser()
@@ -131,7 +148,7 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_toggle(config_path, args.command == "on")
     if args.command == "index":
         return _cmd_index(config_path, extras)
-    if args.command in ("status", "hook-config"):
+    if args.command in ("status", "hook-config", "capture"):
         try:
             config = RouterConfig.load(config_path)
         except ConfigError as e:
@@ -139,6 +156,8 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         if args.command == "status":
             return _cmd_status(config, config_path)
+        if args.command == "capture":
+            return _cmd_capture(config, config_path)
         print_zcode_hook_config(config, config_path)
         return 0
     parser.error(f"unknown command {args.command!r}")  # pragma: no cover
