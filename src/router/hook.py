@@ -19,10 +19,12 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from router import jev, pipeline
+from router import jev, pipeline, telemetry
+from router.caches import prompt_fingerprint
 from router.catalog import Catalog
 from router.config import RouterConfig
 
@@ -103,10 +105,26 @@ def _run(stdin_json: str, config_path: Path) -> HookOutcome:
 
     state = jev.redact(_prompt_state(payload))
     catalog = Catalog(catalog_path)
+    started = time.monotonic()
     try:
         result = pipeline.route(state, catalog, ask=jev.ask)
     finally:
         catalog.close()
+
+    # per-turn telemetry (U10, R11) — success path only, after route();
+    # append_turn never raises (KTD11), so this cannot break the turn.
+    telemetry.append_turn(
+        config.state_dir,
+        {
+            "session": str(payload.get("session_id") or ""),
+            "prompt_fingerprint": prompt_fingerprint(str(payload.get("prompt") or "")),
+            "latency_ms": int((time.monotonic() - started) * 1000),
+            "cost_usd": 0.0,  # not metered on the hook path; the jev.ask trace carries cost (KTD2)
+            "injection_count": len(result.injections),
+            "cache_hit": False,  # the hook path does not consult the verdict cache yet (KTD7 replay is eval-side)
+            "verdicts_digest": telemetry.digest(result.verdicts),
+        },
+    )
 
     if not result.injections:
         return HookOutcome(exit_code=0)  # no match: exit 0, no stdout

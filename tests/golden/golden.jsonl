@@ -1,0 +1,24 @@
+{"id": "g01", "prompt": "We're launching a new SaaS product next month — help me set the price tiers, package the plans, and decide where the paywall should sit.", "expected": ["skill:pricing", "skill:paywalls"], "partition": "calib"}
+{"id": "g02", "prompt": "Draft a cold email to a Series-A fintech CTO introducing our routing layer, plus a follow-up for non-repliers.", "expected": ["skill:cold-email"], "partition": "calib"}
+{"id": "g03", "prompt": "Build me a list of 20 outbound prospects in logistics ops with titles and company size.", "expected": ["skill:prospecting"], "partition": "calib"}
+{"id": "g04", "prompt": "Interview five churned customers, find the cancellation patterns, and propose retention fixes.", "expected": ["skill:customer-research", "skill:churn-prevention"], "partition": "calib"}
+{"id": "g05", "prompt": "Research the agent-skills market: who ships routing tools, at what price, and where are the gaps?", "expected": ["skill:research", "skill:competitor-profiling"], "partition": "calib"}
+{"id": "g06", "prompt": "Rewrite this landing page hero so the benefit leads and the copy stops sounding corporate.", "expected": ["skill:copywriting"], "partition": "calib"}
+{"id": "g07", "prompt": "Audit the marketing site for technical SEO problems: meta descriptions, crawl depth, broken links.", "expected": ["skill:seo-audit"], "partition": "calib"}
+{"id": "g08", "prompt": "Plan 200 programmatic location pages from one template without tripping doorway-page penalties.", "expected": ["skill:programmatic-seo"], "partition": "calib"}
+{"id": "g09", "prompt": "Trial-to-paid conversion dropped eight points this month — find the leak and propose fixes.", "expected": ["skill:churn-prevention", "skill:analytics"], "partition": "calib"}
+{"id": "g10", "prompt": "Write the press announcement for our 1.0 and a reporter outreach plan for launch week.", "expected": ["skill:public-relations", "skill:launch"], "partition": "calib"}
+{"id": "g11", "prompt": "Which reps' outbound sequences actually convert, and what should the enablement onboarding teach them?", "expected": ["skill:sales-enablement", "skill:revops"], "partition": "calib"}
+{"id": "g12", "prompt": "Design a minimalist pricing page that stays consistent with our brand taste guidelines.", "expected": ["skill:minimalist-ui", "skill:design-taste-frontend"], "partition": "calib"}
+{"id": "g13", "prompt": "Set up an A/B test on the new checkout button color and tell me when the result is significant.", "expected": ["skill:ab-testing", "skill:cro"], "partition": "holdout"}
+{"id": "g14", "prompt": "Script a 60-second faceless explainer for our router demo with a scene-by-scene shot list.", "expected": ["skill:faceless-explainer"], "partition": "holdout"}
+{"id": "g15", "prompt": "Add burned-in captions with an overlay hook to this short for TikTok.", "expected": ["skill:captions-overlay", "skill:embedded-captions"], "partition": "holdout"}
+{"id": "g16", "prompt": "Refactor the ingest module test-first: failing test, then implementation, every step.", "expected": ["skill:tdd"], "partition": "holdout"}
+{"id": "g17", "prompt": "This integration test fails only in CI, passes locally — help me diagnose the root cause.", "expected": ["skill:diagnosing-bugs"], "partition": "holdout"}
+{"id": "g18", "prompt": "Review this pull request for correctness, edge cases, and style before I merge.", "expected": ["skill:code-review"], "partition": "holdout"}
+{"id": "g19", "prompt": "Pull everything the team knows about Jev from the knowledge vault and summarize with source links.", "expected": ["skill:wiki-query"], "partition": "holdout"}
+{"id": "g20", "prompt": "Turn these raw meeting notes into proper Obsidian markdown with frontmatter and internal links.", "expected": ["skill:obsidian-markdown"], "partition": "holdout"}
+{"id": "g21", "prompt": "Build a lead magnet: a free pricing calculator that captures email signups.", "expected": ["skill:lead-magnets", "skill:free-tools"], "partition": "holdout"}
+{"id": "g22", "prompt": "Plan the product launch: positioning, tiers, and the announcement sequence across channels.", "expected": ["skill:launch", "skill:product-marketing"], "partition": "holdout"}
+{"id": "g23", "prompt": "Our signup flow leaks users at the profile step — cut the fields, add social auth, reduce drop-off.", "expected": ["skill:signup", "skill:cro"], "partition": "holdout"}
+{"id": "g24", "prompt": "Write a three-email welcome sequence for new subscribers ending in a referral ask.", "expected": ["skill:emails", "skill:referrals"], "partition": "holdout"}

@@ -1,0 +1,24 @@
+{"id": "g01", "prompt": "We're launching a new SaaS product next month — help me set the price tiers, package the plans, and decide where the paywall should sit.", "native": ["skill:pricing"]}
+{"id": "g02", "prompt": "Draft a cold email to a Series-A fintech CTO introducing our routing layer, plus a follow-up for non-repliers.", "native": ["skill:cold-email", "skill:emails"]}
+{"id": "g03", "prompt": "Build me a list of 20 outbound prospects in logistics ops with titles and company size.", "native": ["skill:prospecting"]}
+{"id": "g04", "prompt": "Interview five churned customers, find the cancellation patterns, and propose retention fixes.", "native": ["skill:customer-research", "skill:research"]}
+{"id": "g05", "prompt": "Research the agent-skills market: who ships routing tools, at what price, and where are the gaps?", "native": ["skill:research"]}
+{"id": "g06", "prompt": "Rewrite this landing page hero so the benefit leads and the copy stops sounding corporate.", "native": ["skill:copywriting"]}
+{"id": "g07", "prompt": "Audit the marketing site for technical SEO problems: meta descriptions, crawl depth, broken links.", "native": ["skill:seo-audit"]}
+{"id": "g08", "prompt": "Plan 200 programmatic location pages from one template without tripping doorway-page penalties.", "native": []}
+{"id": "g09", "prompt": "Trial-to-paid conversion dropped eight points this month — find the leak and propose fixes.", "native": ["skill:churn-prevention"]}
+{"id": "g10", "prompt": "Write the press announcement for our 1.0 and a reporter outreach plan for launch week.", "native": ["skill:public-relations"]}
+{"id": "g11", "prompt": "Which reps' outbound sequences actually convert, and what should the enablement onboarding teach them?", "native": ["skill:revops"]}
+{"id": "g12", "prompt": "Design a minimalist pricing page that stays consistent with our brand taste guidelines.", "native": ["skill:minimalist-ui"]}
+{"id": "g13", "prompt": "Set up an A/B test on the new checkout button color and tell me when the result is significant.", "native": ["skill:ab-testing"]}
+{"id": "g14", "prompt": "Script a 60-second faceless explainer for our router demo with a scene-by-scene shot list.", "native": ["skill:faceless-explainer"]}
+{"id": "g15", "prompt": "Add burned-in captions with an overlay hook to this short for TikTok.", "native": ["skill:general-video"]}
+{"id": "g16", "prompt": "Refactor the ingest module test-first: failing test, then implementation, every step.", "native": ["skill:tdd"]}
+{"id": "g17", "prompt": "This integration test fails only in CI, passes locally — help me diagnose the root cause.", "native": ["skill:diagnosing-bugs"]}
+{"id": "g18", "prompt": "Review this pull request for correctness, edge cases, and style before I merge.", "native": ["skill:code-review"]}
+{"id": "g19", "prompt": "Pull everything the team knows about Jev from the knowledge vault and summarize with source links.", "native": ["skill:wiki"]}
+{"id": "g20", "prompt": "Turn these raw meeting notes into proper Obsidian markdown with frontmatter and internal links.", "native": ["skill:obsidian-markdown"]}
+{"id": "g21", "prompt": "Build a lead magnet: a free pricing calculator that captures email signups.", "native": ["skill:lead-magnets"]}
+{"id": "g22", "prompt": "Plan the product launch: positioning, tiers, and the announcement sequence across channels.", "native": ["skill:launch"]}
+{"id": "g23", "prompt": "Our signup flow leaks users at the profile step — cut the fields, add social auth, reduce drop-off.", "native": ["skill:signup"]}
+{"id": "g24", "prompt": "Write a three-email welcome sequence for new subscribers ending in a referral ask.", "native": ["skill:emails", "skill:referrals"]}
