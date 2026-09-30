@@ -75,7 +75,7 @@ Today 227 skill directories sit across `~/.zcode/skills` and `~/.agents/skills`,
 - F4. Self-improvement
   - **Trigger:** Nightly judge run.
   - **Actors:** A3
-  - **Steps:** Telemetry + transcripts scanned for pointer usage → Jev Score judges outcomes → descriptor/trigger tuning written to catalog → fingerprint + payloads rebuilt → results logged with rationale.
+  - **Steps:** Telemetry + transcripts scanned for pointer usage → Jev Score judges outcomes → tuning written to source-side `tuning/` sidecar files (rationale logged) → `router index` applies tuning into the catalog and rebuilds fingerprint + payloads.
   - **Outcome:** Routing quality improves without manual retuning.
   - **Covers R11.**
 - F5. Learning capture
@@ -174,14 +174,14 @@ Product Contract preservation: changed R1 — v1 ZCode-only (owner ruling 2026-0
 - KTD2. **Jev client adopted from jev-implementations `jev.py` shape**: one `ask(state, questions)` fan-out wrapper, typed Noul/Choice/Score answers, JSONL trace (state, questions, answers, usage, latency, cost), threshold policy in code (`p ≥ 0.95` act · `p ≤ 0.05` skip · else escalate), confidence `(n × p_max − 1)/(n − 1)`, retries on 429/529. Governs R2.
 - KTD3. **Catalog schema**: one SQLite file; per-type tables share a core column contract (R4 lists it); custom types auto-create tables from the same contract; `relations(from_id, to_id, kind)` exists as schema but is index-only and reserved for post-v1 consumers — no relation-extraction effort in v1 beyond what sources give free (Obsidian links). Governs R4.
 - KTD4. **Hook mechanism**: single Python script invoked by ZCode UserPromptSubmit; reads JSON payload from stdin; successful routing prints `additionalContext` JSON to stdout (exit 0); no daemon. **Blocking** = exit code 2 (or `decision: "block"`) with the `router off` notice as the block reason on stderr — `additionalContext` never blocks (requires exit 0). ZCode hook `timeoutMs` is registered ≥ the router's Jev timeout so the harness never kills the hook first. Any routing-layer failure (Jev unreachable, router exception, corrupt state, locked catalog) takes the same block-with-notice path; catalog uses WAL + busy-timeout; corrupt session state rebuilds rather than crashes. Governs R1, R9.
-- KTD5. **Override and config**: `router off` / `router on` CLI flips `routing_enabled` in a TOML router config (stdlib `tomllib`); the blocking notice names the exact command; config holds source roots, Jev settings, timeout, `routing_enabled`. The Jev API key never lives in config or repo — config carries a credential reference (env var name or `op://` path), resolved at startup with process-lifetime caching. Governs R9.
+- KTD5. **Override and config**: `router off` / `router on` CLI flips `routing_enabled` in a TOML router config (stdlib `tomllib`); the blocking notice names the exact command; config holds source roots, `capture_mode` (review|auto, default review), Jev settings, timeout, `routing_enabled`. The Jev API key never lives in config or repo — config carries a credential reference (env var name or `op://` path), resolved at startup with process-lifetime caching. Governs R9.
 - KTD6. **Session memory**: per-session JSONL file under a router state dir; entries = turn digest + injected set + active-set with turn-count decay; transcript tail (last-K) read from the path in the hook payload. Governs R7.
 - KTD7. **Caches**: SQLite tables in the catalog file — `verdict_cache(prompt_fingerprint, catalog_fingerprint, verdict_json, ts)` and `negative_cache(prompt_fingerprint, catalog_fingerprint, ts)`; verdict key = normalized prompt + catalog fingerprint only (session memory excluded from the key — it mutates every turn and would defeat replay; staleness handled at inject time against the active-set). Cache hit-rate is a telemetry field with a target; expected hit regime is cross-session cold-start repeats. Governs R8.
 - KTD8. **Knowledge map**: knowledge table stores page→section rows (page, section, heading path, summary line) with the section body text captured in the catalog at index time (plus a source content hash for drift detection) — inject reads from the catalog, never live-file offsets; verbatim, no summarizer. Governs R6.
-- KTD9. **Packaging**: the runtime ships self-contained inside the skill directory (`skills/router/` carries package + bootstrap) so `npx skills add` delivers everything it needs; git clone remains the primary install for development, `npx skills add` the discovery/wrapper path. Bootstrap registers the ZCode hook block (with `timeoutMs` per KTD4), runs the first index, snapshots the harness config before editing (prints diff; `router uninstall` restores), and registers a nightly scheduler entry (launchd/cron) invoking the judge. Catalog and state are per-device and gitignored — each device rebuilds from local sources (repo carries code only); post-commit auto-push covers code. Exact skills.sh manifest spec verified at build against the `npx skills` CLI. Governs R12.
+- KTD9. **Packaging**: the runtime ships self-contained inside the skill directory (`skills/router/` carries package + bootstrap) so `npx skills add` delivers everything it needs; git clone remains the primary install for development, `npx skills add` the discovery/wrapper path. Bootstrap registers the ZCode hook block (with `timeoutMs` per KTD4), runs the first index, snapshots the harness config before editing (prints diff; `router uninstall` restores), and registers a nightly scheduler entry (launchd/cron) invoking the judge then the capture drainer; every `router index` run also drains the capture queue. Catalog and state are per-device and gitignored — each device rebuilds from local sources (repo carries code only); post-commit auto-push covers code. Exact skills.sh manifest spec verified at build against the `npx skills` CLI. Governs R12.
 - KTD10. **Evals**: pytest suite; golden set JSONL (prompt, expected capability ids) split into a calibration partition and a held-out partition — the sweep tunes on calibration, the ≥-baseline gate scores held-out only; baseline = ZCode-native triggering elicited and scored by a documented harness on the same prompts; every prompt run 3×, majority vote, variance reported; the gate requires ≥ baseline by a stated margin (default: outside the majority-vote variance). Governs R11.
 
-- KTD11. **Learning capture**: per-turn gate question ("any candidate learning?") appends to `captures/pending.jsonl`; `router capture` drains — Jev Score judges each candidate, drafts the file addition (skill stub, rule section, roster line, new-type source dir), writes to `captures/drafts/` for review or directly to the source tree per config; `router index` runs after apply. The catalog is derived-only: no writer inserts rows outside the indexer. Governs R13.
+- KTD11. **Learning capture**: per-turn gate question ("any candidate learning?") appends one line to `captures/pending.jsonl` in the per-device state dir (append-only, batched with the telemetry write, never touches sources mid-turn; append failure logs and continues — routing already succeeded). `router capture` drains — Jev Score judges each candidate (acceptance ≥0.8 drafts, below discards with logged rationale), drafts the file addition, writes via temp-file+rename, skips already-captured content by hash. **Review mode is the shipped default** (`capture_mode = "review"` in config, KTD5 contract); auto mode writes the source tree only on explicit opt-in. **Accepted captures land in a router-owned captured-sources root inside the repo (`sources/captured/<type>/`, one config source root per type)** — git-synced, indexed by the indexer, excluded from harness skill scanning; external trees (vault, `~/.zcode/skills`) stay read-only sources. The catalog is derived-only: no writer inserts rows outside the indexer. Capture-to-routable latency = next drain (nightly, or any `router index` run, which also drains). Governs R13.
 
 ### High-Level Technical Design
 
@@ -350,7 +350,7 @@ Unit index:
 - **Requirements:** R11.
 - **Dependencies:** U10.
 - **Files:** `src/router/judge.py`, `tests/test_judge.py`.
-- **Approach:** scan telemetry + transcripts for pointer usage; Jev Score judges each routed turn; write descriptor/trigger-term tuning with rationale to catalog; **every catalog writer recomputes the fingerprint and rebuilds affected precomputed payloads — the judge's final step invokes `router index`** so tuning actually affects routing; log every change.
+- **Approach:** scan telemetry + transcripts for pointer usage; Jev Score judges each routed turn; tuning written to source-side `tuning/` sidecar files with rationale — the indexer merges them into the catalog (derived-only invariant holds: recreate migration never loses tuning); the judge's final step invokes `router index`; log every change.
 - **Test scenarios:** used-pointer turns score higher than ignored ones; judge writes a tuning with rationale; no-telemetry night is a no-op.
 - **Verification:** one judge run over real week-one logs writes ≥1 documented tuning.
 
@@ -383,7 +383,7 @@ Unit index:
 - **Dependencies:** U4.
 - **Files:** `src/router/capture.py`, `tests/test_capture.py`.
 - **Approach:** per KTD11 — one extra gate question; candidates appended to `captures/pending.jsonl`; zero mid-turn source writes; queue entry carries turn context for the drainer.
-- **Test scenarios:** unknown skill mentioned → queue entry with context; rule-shaped instruction ("always X") → candidate typed `rule`; no candidates → no queue write; queue append fails → block-with-notice path (KTD4).
+- **Test scenarios:** unknown skill mentioned → queue entry with context; rule-shaped instruction ("always X") → candidate typed `rule`; no candidates → no queue write; queue append fails → log-and-continue (routing already succeeded; line recovered next drain), turn NOT blocked.
 - **Verification:** `pytest tests/test_capture.py` green; live turn mentioning a new tool produces a queue entry.
 
 ### U15. Capture drainer
@@ -410,7 +410,7 @@ Unit index:
 
 ## Definition of Done
 
-- All thirteen units land with their verifications green.
+- All fifteen units land with their verifications green.
 - U13 slim-down: static skill list and ZCode-scoped instruction surfaces reduced to skeletons in a real session (shared/vault-level AGENTS.md files untouched until multi-harness adapters exist); routing replaces dumping.
 - Blocking path proven live via exit-2 spike; `router on` restores.
 - Eval + performance + calibration gates pass.
