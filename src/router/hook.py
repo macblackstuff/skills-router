@@ -204,12 +204,16 @@ def zcode_hook_config(config: RouterConfig, config_path: Path | str | None = Non
         else Path(DEFAULT_CONFIG).expanduser()
     )
     timeout_ms = max(MIN_HOOK_TIMEOUT_MS, config.timeout_ms + 15_000)
+    src_root = Path(__file__).resolve().parents[1]
     return {
         "hooks": {
             "events": {
                 HOOK_EVENT: [
                     {
-                        "command": f"python3 -m router.hook --config {path}",
+                        "command": (
+                            f"PYTHONPATH={src_root} python3 -m router.hook"
+                            f" --config {path}"
+                        ),
                         "timeoutMs": timeout_ms,
                     }
                 ]
