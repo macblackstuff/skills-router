@@ -74,3 +74,8 @@ def iter_rows(path: str | Path, type_name: str = "model") -> list[dict]:
             "_mtime": st.st_mtime,
         })
     return rows
+
+
+def names(path: str | Path) -> list[str]:
+    """Model names only — used by discovery to compare against transcripts."""
+    return [str(r["name"]) for r in iter_rows(path)]
