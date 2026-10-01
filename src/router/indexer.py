@@ -282,6 +282,25 @@ def pack_shards(rows: list[dict], budget_tokens: int = BUDGET_TOKENS,
 
 # -- orchestration ----------------------------------------------------------------
 
+_RESERVED_TABLES = frozenset({"relations", "meta", "verdict_cache", "negative_cache"})
+
+
+def _drop_deconfigured_types(catalog: Catalog, configured: set[str]) -> None:
+    """Delete type tables + shard payloads absent from this run's config."""
+    existing = {
+        r[0]
+        for r in catalog.rows(
+            "SELECT name FROM sqlite_master WHERE type='table' "
+            "AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'shards:%'"
+        )
+    }
+    for table in sorted(existing - _RESERVED_TABLES - configured):
+        catalog.db.execute(f"DROP TABLE {table}")
+    for (key,) in catalog.rows("SELECT key FROM meta WHERE key LIKE 'shards:%'"):
+        if key.split(":", 1)[1] not in configured:
+            catalog.db.execute("DELETE FROM meta WHERE key=?", (key,))
+
+
 def run_index(config: RouterConfig, catalog: Catalog | None = None,
               custom_sources: dict[str, list[dict]] | None = None,
               budget_tokens: int = BUDGET_TOKENS,
@@ -322,6 +341,9 @@ def run_index(config: RouterConfig, catalog: Catalog | None = None,
         result.counts[type_name] = len(rows)
         result.alias_counts[type_name] = n_alias
         result.shard_counts[type_name] = len(packed["shards"])
+    # Recreate semantics across the whole catalog: types deconfigured since
+    # the last index must not keep routing (review finding — ghost tables).
+    _drop_deconfigured_types(catalog, set(rows_by_type))
     # Fingerprint over rows + shards; the previous fingerprint row must not
     # feed its own successor, so drop it before hashing.
     catalog.db.execute("DELETE FROM meta WHERE key=?", (FINGERPRINT_KEY,))

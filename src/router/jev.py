@@ -11,6 +11,7 @@ control.
 """
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
 import os
@@ -34,13 +35,19 @@ _MAX_RETRIES = 2  # extra attempts on 429/529, after the first
 _RETRY_BACKOFF_S = 0.5  # doubles per retry; patched to 0 in tests
 
 # Egress redaction gate (KTD2): regexes compiled once, scrubbed before state
-# assembly; linear pass over ~6 patterns keeps the gate under the <5ms budget.
+# assembly; linear pass keeps the gate under the <5ms budget.
 _REDACTED = "[REDACTED]"
 _REDACT_PATTERNS = (
     re.compile(r"op://[a-z0-9]+(?:/[A-Za-z0-9_.-]+)+"),  # 1Password refs
-    re.compile(r"sk-[A-Za-z0-9]{20,}"),  # OpenAI-style API keys
+    re.compile(r"sk-[A-Za-z0-9_-]{20,}"),  # OpenAI/Anthropic-style keys (hyphen-tolerant)
     re.compile(r"AKIA[0-9A-Z]{16}"),  # AWS access key ids
-    re.compile(r"ghp_[A-Za-z0-9]{36}"),  # GitHub PATs
+    re.compile(r"gh[pousr]_[A-Za-z0-9]{20,}"),  # GitHub tokens (ghp_/gho_/ghu_/ghs_/ghr_)
+    re.compile(r"github_pat_[A-Za-z0-9_]{20,}"),  # fine-grained GitHub PATs
+    re.compile(r"glpat-[A-Za-z0-9_-]{15,}"),  # GitLab PATs
+    re.compile(r"xox[baprs]-[A-Za-z0-9-]{10,}"),  # Slack tokens
+    re.compile(r"AIza[0-9A-Za-z_-]{35}"),  # Google API keys
+    re.compile(r"eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{5,}"),  # JWTs
+    re.compile(r"[A-Za-z0-9+/]{40}(?![A-Za-z0-9+/])"),  # AWS secret access keys (40-char b64)
     re.compile(r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----.*?-----END [A-Z0-9 ]*PRIVATE KEY-----", re.DOTALL),
     re.compile(r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----"),  # orphaned header
 )
@@ -80,6 +87,37 @@ def redact(text: str) -> str:
     for pattern in _REDACT_PATTERNS:
         text = pattern.sub(_REDACTED, text)
     return text
+
+
+def _redact_questions(questions: dict) -> dict:
+    """Apply the egress gate to question instructions/criteria (shard text)."""
+    out = {}
+    for qid, spec in questions.items():
+        if not isinstance(spec, dict):
+            out[qid] = spec
+            continue
+        cleaned = dict(spec)
+        if isinstance(cleaned.get("instructions"), str):
+            cleaned["instructions"] = redact(cleaned["instructions"])
+        criteria = cleaned.get("criteria")
+        if isinstance(criteria, dict):
+            cleaned["criteria"] = {
+                k: redact(v) if isinstance(v, str) else v
+                for k, v in criteria.items()
+            }
+        elif isinstance(criteria, list):
+            cleaned["criteria"] = [
+                redact(v) if isinstance(v, str) else v for v in criteria
+            ]
+        out[qid] = cleaned
+    return out
+
+
+# One credential resolution per process (review finding: up to 8 `op read`
+# subprocesses per turn when resolved inside every ask).
+@functools.lru_cache(maxsize=4)
+def _resolve_credential_cached(ref: str) -> str:
+    return resolve_credential(ref)
 
 
 def resolve_credential(ref: str) -> str:
@@ -124,7 +162,10 @@ def ask(
     """
     state = redact(state)
     timeout_ms = DEFAULT_TIMEOUT_MS if timeout_ms is None else timeout_ms
-    api_key = resolve_credential(credential_ref or DEFAULT_CREDENTIAL_ENV)
+    api_key = _resolve_credential_cached(credential_ref or DEFAULT_CREDENTIAL_ENV)
+    # Shard text rides inside question instructions/criteria — same egress
+    # gate as state (review finding: secrets quoted in indexed sources).
+    questions = _redact_questions(questions)
     body = {"state": state, "model": model, "questions": questions}
 
     started = time.monotonic()

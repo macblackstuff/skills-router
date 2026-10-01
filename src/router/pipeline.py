@@ -50,6 +50,7 @@ class RouteResult:
     verdicts: dict
     no_match: bool
     capture_candidate: float | None = None
+    survivors: Tuple[str, ...] = ()
 
 
 # -- stage 1: triage --------------------------------------------------------
@@ -299,15 +300,24 @@ def route(
 
     gate_verdicts, survivors, capture_p = _gate(prompt_state, winners, catalog, ask)
     verdicts["gate"] = gate_verdicts
+    # Knowledge survivors inject verbatim section text (settled R6/AE2);
+    # every other type keeps the R5 pointer line.
+    knowledge_ids = [q for q in survivors if q.startswith("knowledge:")]
+    other_ids = [q for q in survivors if not q.startswith("knowledge:")]
     injections = [
         line
-        for line in (_injection_line(catalog, q) for q in survivors)
+        for line in (_injection_line(catalog, q) for q in other_ids)
         if line is not None
     ]
+    if knowledge_ids:
+        from router.knowledge import knowledge_inject
+
+        injections.extend(knowledge_inject(knowledge_ids, catalog))
     no_match = gate_verdicts["choice"] == NONE or not injections
     return RouteResult(
         injections=injections,
         verdicts=verdicts,
         no_match=no_match,
         capture_candidate=capture_p,
+        survivors=tuple(survivors),
     )

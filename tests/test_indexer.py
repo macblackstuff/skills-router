@@ -303,7 +303,13 @@ def test_multi_type_run_counts_and_shard_keys(tmp_path, catalog):
     assert result.counts == {"model": 1, "rule": 1, "skill": 1}
     for t in ("skill", "rule", "model"):
         assert shards_of(catalog, t)["shards"]
-    assert catalog.count("knowledge") == 0
+    # Deconfigured types are dropped entirely (recreate semantics, review fix):
+    # no knowledge table and no shards:knowledge payload may survive.
+    knowledge_tables = catalog.rows(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='knowledge'"
+    )
+    assert knowledge_tables == []
+    assert catalog.rows("SELECT 1 FROM meta WHERE key='shards:knowledge'") == []
 
 
 def test_missing_config_errors_cleanly_via_cli(tmp_path, capsys):

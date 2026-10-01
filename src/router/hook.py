@@ -24,7 +24,8 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from router import capture, jev, pipeline, telemetry
+from router import capture, jev, memory, pipeline, telemetry
+from router import caches as caches_mod
 from router.caches import prompt_fingerprint
 from router.catalog import Catalog
 from router.config import RouterConfig
@@ -65,30 +66,6 @@ def _parse_payload(stdin_json: str) -> dict:
     return payload
 
 
-def _transcript_tail(transcript_path: object) -> list[str]:
-    """Last-K non-empty transcript lines; unreadable/missing path -> no tail."""
-    if not transcript_path:
-        return []
-    try:
-        text = Path(str(transcript_path)).read_text(
-            encoding="utf-8", errors="replace"
-        )
-    except OSError:
-        return []
-    lines = [line for line in text.splitlines() if line.strip()]
-    return lines[-TRANSCRIPT_TAIL_LINES:]
-
-
-def _prompt_state(payload: dict) -> str:
-    """Prompt + transcript tail, pre-redaction; missing fields tolerated."""
-    prompt = str(payload.get("prompt") or "")
-    state = f"PROMPT:\n{prompt}"
-    tail = _transcript_tail(payload.get("transcript_path"))
-    if tail:
-        state += "\n\nTRANSCRIPT TAIL:\n" + "\n".join(tail)
-    return state
-
-
 # -- core flow ------------------------------------------------------------------
 
 def _run(stdin_json: str, config_path: Path) -> HookOutcome:
@@ -104,44 +81,92 @@ def _run(stdin_json: str, config_path: Path) -> HookOutcome:
             f"(run: python3 -m router.cli index)"
         )
 
-    state = jev.redact(_prompt_state(payload))
-    catalog = Catalog(catalog_path)
-    started = time.monotonic()
-    ask_bound = functools.partial(
-        jev.ask,
-        credential_ref=config.credential_ref,
-        timeout_ms=config.timeout_ms,
-        trace_path=config.state_path("trace.jsonl"),
-    )
-    try:
-        result = pipeline.route(state, catalog, ask=ask_bound)
-    finally:
-        catalog.close()
+    prompt = str(payload.get("prompt") or "")
+    session_id = str(payload.get("session_id") or "")
+    transcript_path = payload.get("transcript_path")
 
-    # per-turn learning capture (R13/KTD11): queue the candidate; append
-    # never raises and returns False on failure (log-and-continue, review
-    # fix) — routing already succeeded, so this cannot block the turn.
-    if result.capture_candidate is not None:
+    # Session memory (R7/KTD6): rolling context + active-set feed Jev state;
+    # record_turn after the route keeps judge/discovery fed.
+    mem = memory.SessionMemory(config.state_dir)
+    state = jev.redact(mem.context_state(prompt, session_id, transcript_path))
+
+    catalog = Catalog(catalog_path)
+    caches = caches_mod.Caches(catalog)  # patches fingerprint to exclude caches
+    started = time.monotonic()
+    cache_hit = False
+    prompt_fp = prompt_fingerprint(prompt)
+    catalog_fp = catalog.fingerprint()
+
+    # Verdict/negative caches (R8/KTD7): replay before paying Jev (AE4).
+    cached = caches.lookup_verdict(prompt_fp, catalog_fp)
+    if cached is not None:
+        cache_hit = True
+        result = pipeline.RouteResult(
+            injections=list(cached.get("injections", [])),
+            verdicts={"cached": True},
+            no_match=not cached.get("injections"),
+            survivors=tuple(cached.get("survivors", ())),
+        )
+    elif caches.is_negative(prompt_fp, catalog_fp):
+        cache_hit = True
+        result = pipeline.RouteResult(
+            injections=[], verdicts={"cached_negative": True}, no_match=True
+        )
+    else:
+        ask_bound = functools.partial(
+            jev.ask,
+            credential_ref=config.credential_ref,
+            timeout_ms=config.timeout_ms,
+            trace_path=config.state_path("trace.jsonl"),
+        )
+        result = pipeline.route(state, catalog, ask=ask_bound)
+
+    # per-turn learning capture (R13/KTD11): queue the candidate when the
+    # gate raised a meaningful signal; append never raises and returns False
+    # on failure (log-and-continue) — routing already succeeded.
+    if result.capture_candidate is not None and result.capture_candidate >= 0.60:
         capture.append(
             {
                 "kind": "learning",
-                "payload": str(payload.get("prompt") or "")[:500],
-                "score": result.capture_candidate,
+                "text": jev.redact(prompt)[:500],
+                "payload": {"score": result.capture_candidate},
+                "turn_context": {
+                    "session": session_id,
+                    "injections": list(result.injections),
+                },
             },
             config,
         )
+
+    if not cache_hit:
+        try:
+            if result.no_match:
+                caches.store_negative(prompt_fp, catalog_fp)
+            else:
+                caches.store_verdict(
+                    prompt_fp,
+                    catalog_fp,
+                    {
+                        "injections": result.injections,
+                        "survivors": list(result.survivors),
+                    },
+                )
+        finally:
+            catalog.close()
+
+    mem.record_turn(session_id, prompt, injected_ids=result.survivors)
 
     # per-turn telemetry (U10, R11) — success path only, after route();
     # append_turn never raises (KTD11), so this cannot break the turn.
     telemetry.append_turn(
         config.state_dir,
         {
-            "session": str(payload.get("session_id") or ""),
-            "prompt_fingerprint": prompt_fingerprint(str(payload.get("prompt") or "")),
+            "session": session_id,
+            "prompt_fingerprint": prompt_fp,
             "latency_ms": int((time.monotonic() - started) * 1000),
             "cost_usd": 0.0,  # not metered on the hook path; the jev.ask trace carries cost (KTD2)
             "injection_count": len(result.injections),
-            "cache_hit": False,  # the hook path does not consult the verdict cache yet (KTD7 replay is eval-side)
+            "cache_hit": cache_hit,
             "verdicts_digest": telemetry.digest(result.verdicts),
         },
     )
@@ -216,7 +241,13 @@ def zcode_hook_config(config: RouterConfig, config_path: Path | str | None = Non
         if config_path is not None
         else Path(DEFAULT_CONFIG).expanduser()
     )
-    timeout_ms = max(MIN_HOOK_TIMEOUT_MS, config.timeout_ms + 15_000)
+    timeout_ms = max(
+        MIN_HOOK_TIMEOUT_MS,
+        # Pipeline worst case: 3 sequential Jev layers, each up to timeout_ms
+        # per attempt with up to 2 retries + backoff (KTD4: the harness must
+        # never kill the hook before the fail-closed notice renders).
+        3 * config.timeout_ms + 3_000 + 15_000,
+    )
     src_root = Path(__file__).resolve().parents[1]
     return {
         "hooks": {

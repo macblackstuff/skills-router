@@ -353,4 +353,6 @@ def test_print_zcode_hook_config(tmp_path, capsys):
     entry = doc["hooks"]["events"]["UserPromptSubmit"][0]
     assert entry["command"].startswith("PYTHONPATH=")
     assert entry["command"].endswith(f"python3 -m router.hook --config {cfg}")
-    assert entry["timeoutMs"] == 45000  # >= Jev 30s timeout per KTD4
+    # Sized for the pipeline worst case: 3 sequential Jev layers x 30s
+    # timeout + retry backoff + overhead (review fix — 45s covered ONE call).
+    assert entry["timeoutMs"] == 3 * 30_000 + 3_000 + 15_000

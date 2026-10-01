@@ -71,7 +71,17 @@ def _cmd_index(config_path: Path, rest: list[str]) -> int:
     argv = list(rest)
     if "--config" not in argv:
         argv = ["--config", str(config_path)] + argv
-    return indexer.main(argv)
+    rc = indexer.main(argv)
+    if rc == 0:
+        # KTD11: every index run also drains the capture queue.
+        try:
+            from router.config import RouterConfig
+            from router.drainer import drain
+
+            drain(RouterConfig.load(config_path))
+        except Exception as e:  # drain failure must not fail the index
+            print(f"router index: capture drain skipped ({e})", file=sys.stderr)
+    return rc
 
 
 def _catalog_tables(catalog: Catalog) -> list[str]:
