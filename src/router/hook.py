@@ -24,7 +24,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from router import jev, pipeline, telemetry
+from router import capture, jev, pipeline, telemetry
 from router.caches import prompt_fingerprint
 from router.catalog import Catalog
 from router.config import RouterConfig
@@ -117,6 +117,19 @@ def _run(stdin_json: str, config_path: Path) -> HookOutcome:
         result = pipeline.route(state, catalog, ask=ask_bound)
     finally:
         catalog.close()
+
+    # per-turn learning capture (R13/KTD11): queue the candidate; append
+    # never raises and returns False on failure (log-and-continue, review
+    # fix) — routing already succeeded, so this cannot block the turn.
+    if result.capture_candidate is not None:
+        capture.append(
+            {
+                "kind": "learning",
+                "payload": str(payload.get("prompt") or "")[:500],
+                "score": result.capture_candidate,
+            },
+            config,
+        )
 
     # per-turn telemetry (U10, R11) — success path only, after route();
     # append_turn never raises (KTD11), so this cannot break the turn.
