@@ -6,10 +6,10 @@ whose frontmatter uses the small YAML subset parsed by skills.parse_frontmatter.
 """
 from __future__ import annotations
 
-import hashlib
 import json
-from datetime import datetime, timezone
 from pathlib import Path
+
+from router.sources._common import content_hash, iso as _iso
 
 from router.sources.skills import parse_frontmatter
 
@@ -20,10 +20,6 @@ def _plugin_md(d: Path) -> Path | None:
         if p.is_file():
             return p
     return None
-
-
-def _iso(mtime: float) -> str:
-    return datetime.fromtimestamp(mtime, tz=timezone.utc).isoformat(timespec="seconds")
 
 
 def iter_rows(dirs: list[str | Path], type_name: str = "plugin") -> list[dict]:
@@ -53,7 +49,7 @@ def iter_rows(dirs: list[str | Path], type_name: str = "plugin") -> list[dict]:
                 "path": str(plugin_md),
                 "source": str(root),
                 "version": str(version) if version not in (None, "") else None,
-                "content_hash": hashlib.sha256(raw).hexdigest(),
+                "content_hash": content_hash(raw),
                 "last_verified": _iso(st.st_mtime),
                 "enabled": 1,
                 "extras": json.dumps({"dir": sd.name}),

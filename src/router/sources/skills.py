@@ -6,11 +6,11 @@ quoted scalars, and folded (`>-`) / literal (`|`) block scalars.
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import re
-from datetime import datetime, timezone
 from pathlib import Path
+
+from router.sources._common import content_hash, iso as _iso
 
 _KEY_RE = re.compile(r"^(\s*)([A-Za-z0-9_.\- ]+?):\s*(.*)$")
 _FOLDED = (">", ">-", ">", "|", "|-")  # block scalar introducers
@@ -67,10 +67,6 @@ def parse_frontmatter(text: str) -> dict:
     return fm
 
 
-def _iso(mtime: float) -> str:
-    return datetime.fromtimestamp(mtime, tz=timezone.utc).isoformat(timespec="seconds")
-
-
 def iter_rows(dirs: list[str | Path], type_name: str = "skill") -> list[dict]:
     rows: list[dict] = []
     for d in dirs:
@@ -96,7 +92,7 @@ def iter_rows(dirs: list[str | Path], type_name: str = "skill") -> list[dict]:
                 "path": str(skill_md),
                 "source": str(root),
                 "version": str(version) if version not in (None, "") else None,
-                "content_hash": hashlib.sha256(raw).hexdigest(),
+                "content_hash": content_hash(raw),
                 "last_verified": _iso(st.st_mtime),
                 "enabled": 1,
                 "extras": json.dumps({"dir": sd.name}),

@@ -9,8 +9,9 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from datetime import datetime, timezone
 from pathlib import Path
+
+from router.sources._common import iso as _iso
 
 from router.sources.rules import slug, strip_frontmatter
 
@@ -26,10 +27,6 @@ def first_sentence(text: str, limit: int = 200) -> str:
         if ch in ".!?" and (i + 1 == len(s) or s[i + 1] == " "):
             return s[: i + 1][:limit]
     return s[:limit]
-
-
-def _iso(mtime: float) -> str:
-    return datetime.fromtimestamp(mtime, tz=timezone.utc).isoformat(timespec="seconds")
 
 
 def _sections(text: str) -> tuple[str, list[tuple[str | None, list[str]]]]:

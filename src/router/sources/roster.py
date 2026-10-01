@@ -9,8 +9,9 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from datetime import datetime, timezone
 from pathlib import Path
+
+from router.sources._common import iso as _iso
 
 from router.sources.rules import slug
 
@@ -23,10 +24,6 @@ def _table_cells(line: str) -> list[str] | None:
     if not (s.startswith("|") and s.endswith("|")) or len(s) < 2:
         return None
     return [c.strip() for c in s[1:-1].split("|")]
-
-
-def _iso(mtime: float) -> str:
-    return datetime.fromtimestamp(mtime, tz=timezone.utc).isoformat(timespec="seconds")
 
 
 def iter_rows(path: str | Path, type_name: str = "model") -> list[dict]:

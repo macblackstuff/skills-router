@@ -8,17 +8,13 @@ frontmatter fall back to stem + first paragraph.
 """
 from __future__ import annotations
 
-import hashlib
 import json
-from datetime import datetime, timezone
 from pathlib import Path
+
+from router.sources._common import content_hash, iso as _iso
 
 from router.sources.rules import first_paragraph, strip_frontmatter
 from router.sources.skills import parse_frontmatter
-
-
-def _iso(mtime: float) -> str:
-    return datetime.fromtimestamp(mtime, tz=timezone.utc).isoformat(timespec="seconds")
 
 
 def _files(dirs: list[str | Path]) -> list[Path]:
@@ -62,7 +58,7 @@ def iter_rows(dirs: list[str | Path], type_name: str = "agent") -> list[dict]:
             "path": str(f),
             "source": str(f.parent),
             "version": str(version) if version not in (None, "") else None,
-            "content_hash": hashlib.sha256(raw).hexdigest(),
+            "content_hash": content_hash(raw),
             "last_verified": _iso(st.st_mtime),
             "enabled": 1,
             "extras": json.dumps({

@@ -7,8 +7,9 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from datetime import datetime, timezone
 from pathlib import Path
+
+from router.sources._common import content_hash, iso as _iso
 
 _HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*#*\s*$")
 
@@ -49,10 +50,6 @@ def first_paragraph(text: str) -> str:
     return " ".join(para)
 
 
-def _iso(mtime: float) -> str:
-    return datetime.fromtimestamp(mtime, tz=timezone.utc).isoformat(timespec="seconds")
-
-
 def iter_rows(paths: list[str | Path], type_name: str = "rule") -> list[dict]:
     files: list[Path] = []
     for p in paths:
@@ -82,7 +79,7 @@ def iter_rows(paths: list[str | Path], type_name: str = "rule") -> list[dict]:
                     "description": first_paragraph(text),
                     **base,
                     "trigger_terms": first_paragraph(text),
-                    "content_hash": hashlib.sha256(raw).hexdigest(),
+                    "content_hash": content_hash(raw),
                     "extras": json.dumps({"file": f.name, "level": 0}),
                 })
             continue

@@ -6,20 +6,16 @@ else the file stem; description is the first paragraph after the title.
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import re
-from datetime import datetime, timezone
 from pathlib import Path
+
+from router.sources._common import content_hash, iso as _iso
 
 from router.sources.rules import first_paragraph, strip_frontmatter
 from router.sources.skills import parse_frontmatter
 
 _H1_RE = re.compile(r"^#\s+(.+?)\s*$")
-
-
-def _iso(mtime: float) -> str:
-    return datetime.fromtimestamp(mtime, tz=timezone.utc).isoformat(timespec="seconds")
 
 
 def _title_and_body(text: str) -> tuple[str | None, str]:
@@ -62,7 +58,7 @@ def iter_rows(dirs: list[str | Path], type_name: str = "memory") -> list[dict]:
             "path": str(f),
             "source": str(f.parent),
             "version": str(version) if version not in (None, "") else None,
-            "content_hash": hashlib.sha256(raw).hexdigest(),
+            "content_hash": content_hash(raw),
             "last_verified": _iso(st.st_mtime),
             "enabled": 1,
             "extras": json.dumps({"file": f.name, "topic": h1 or f.stem}),

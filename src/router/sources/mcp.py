@@ -9,14 +9,11 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import datetime, timezone
 from pathlib import Path
 
+from router.sources._common import iso as _iso
+
 from router.sources.rules import slug
-
-
-def _iso(mtime: float) -> str:
-    return datetime.fromtimestamp(mtime, tz=timezone.utc).isoformat(timespec="seconds")
 
 
 def _servers(raw) -> dict[str, dict]:
