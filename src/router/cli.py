@@ -8,6 +8,7 @@ verify the edited file still parses and the flip took before reporting.
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import sys
 from pathlib import Path
@@ -99,6 +100,20 @@ def _catalog_tables(catalog: Catalog) -> list[str]:
 def _cmd_status(config: RouterConfig, config_path: Path) -> int:
     print(f"config {config_path}")
     print(f"routing {'enabled' if config.routing_enabled else 'disabled'}")
+    # Hook registration truth: is the router in the live harness config?
+    hook_registered = False
+    zcode_cfg = Path("~/.zcode/cli/config.json").expanduser()
+    try:
+        import json as _json
+
+        raw = _json.loads(zcode_cfg.read_text())
+        for entry in raw.get("hooks", {}).get("events", {}).get("UserPromptSubmit", []):
+            if "router.hook" in str(entry.get("command", "")):
+                hook_registered = True
+    except Exception:
+        pass
+    print(f"hook registered in zcode config: {'yes' if hook_registered else 'NO'}")
+    print("(sessions opened before registration do not route — restart to activate)")
     catalog_path = config.state_path("catalog.db")
     print(f"catalog {catalog_path}")
     if not catalog_path.is_file():
@@ -116,6 +131,24 @@ def _cmd_status(config: RouterConfig, config_path: Path) -> int:
         print(f"rows {detail}")
     finally:
         catalog.close()
+    # Last routed turns: the ground truth for "did it fire?" (silent no-match
+    # turns log here too, so not-firing and no-match stop being confusable).
+    turns_path = config.state_path("telemetry", "turns.jsonl")
+    if turns_path.is_file():
+        lines = turns_path.read_text().splitlines()[-5:]
+        print("last routed turns (telemetry):")
+        for line in reversed(lines):
+            try:
+                t = json.loads(line)
+            except ValueError:
+                continue
+            print(
+                f"  {t.get('ts', '?')[11:19]}  session={str(t.get('session', '?'))[:24]:24}"
+                f"  injections={t.get('injection_count', '?')}"
+                f"  cache={'hit' if t.get('cache_hit') else 'miss '}  {t.get('latency_ms', '?')}ms"
+            )
+    else:
+        print("last routed turns: none — the hook has never fired (check registration + session age)")
     return 0
 
 

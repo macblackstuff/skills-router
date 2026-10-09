@@ -356,3 +356,86 @@ def test_print_zcode_hook_config(tmp_path, capsys):
     # Sized for the pipeline worst case: 3 sequential Jev layers x 30s
     # timeout + retry backoff + overhead (review fix — 45s covered ONE call).
     assert entry["timeoutMs"] == 3 * 30_000 + 3_000 + 15_000
+
+
+# -- integration: two turns, one session (cache + memory + capture) ---------------
+
+def test_two_turn_integration_cache_memory_capture(monkeypatch, tmp_path):
+    """The review-gap regression test: hook must actually WIRE caches, session
+    memory, and capture — not just have the modules exist. Turn 1 routes
+    (full Jev); turn 2 with the same prompt+session must replay from cache
+    (route NOT re-called), record memory, and queue a capture candidate."""
+    cfg, _ = make_state(tmp_path)
+    calls = {"n": 0}
+
+    class CountingRoute:
+        result = RouteResult(
+            injections=[POINTER],
+            verdicts={},
+            no_match=False,
+            capture_candidate=0.9,
+            survivors=("skill:pricing",),
+        )
+
+        def __call__(self, state, catalog, ask=None, worker_ceiling=6):
+            calls["n"] += 1
+            return self.result
+
+    monkeypatch.setattr(hook.pipeline, "route", CountingRoute())
+
+    out1 = hook.run_hook(payload(session_id="sess-int"), cfg)
+    assert out1.exit_code == 0 and out1.additional_context == POINTER
+    assert calls["n"] == 1
+
+    state_dir = tmp_path / "state"
+
+    # Memory: turn 1 recorded the survivor.
+    session_file = state_dir / "sessions" / "sess-int.jsonl"
+    assert session_file.is_file(), "record_turn never wrote the session file"
+    entry = json.loads(session_file.read_text().splitlines()[-1])
+    assert "skill:pricing" in entry["injected"]
+
+    # Capture: candidate >= 0.60 queued under the contract shape (text nested
+    # in payload per capture.append's entry format).
+    pending = state_dir / "captures" / "pending.jsonl"
+    assert pending.is_file(), "capture.append never wrote pending.jsonl"
+    cap = json.loads(pending.read_text().splitlines()[-1])
+    assert cap["payload"]["text"] and cap["kind"]
+    assert cap["session"] == "sess-int"
+
+    # Turn 2: same prompt + session -> cache replay, route NOT re-called.
+    out2 = hook.run_hook(payload(session_id="sess-int"), cfg)
+    assert out2.exit_code == 0
+    assert out2.additional_context == POINTER
+    assert calls["n"] == 1, "turn 2 re-ran Jev instead of replaying the verdict"
+
+    # Telemetry tells the truth about the cache.
+    turns = (state_dir / "telemetry" / "turns.jsonl").read_text().splitlines()
+    hits = [json.loads(t)["cache_hit"] for t in turns]
+    assert hits == [False, True]
+
+    # Memory: turn 2 recorded too.
+    assert len(session_file.read_text().splitlines()) == 2
+
+
+def test_no_match_turn_stores_negative_cache(monkeypatch, tmp_path):
+    cfg, _ = make_state(tmp_path)
+
+    class NoMatch:
+        result = RouteResult(
+            injections=[], verdicts={}, no_match=True, capture_candidate=None
+        )
+
+        def __call__(self, state, catalog, ask=None, worker_ceiling=6):
+            return self.result
+
+    monkeypatch.setattr(hook.pipeline, "route", NoMatch())
+
+    first = hook.run_hook(payload(session_id="sess-neg"), cfg)
+    assert first.exit_code == 0 and first.additional_context is None
+
+    second = hook.run_hook(payload(session_id="sess-neg"), cfg)
+    assert second.exit_code == 0 and second.additional_context is None
+    turns = (tmp_path / "state" / "telemetry" / "turns.jsonl").read_text()
+    hits = [json.loads(t)["cache_hit"] for t in turns.splitlines()]
+    assert hits == [False, True], "negative cache did not serve turn 2"

@@ -130,6 +130,7 @@ def _run(stdin_json: str, config_path: Path) -> HookOutcome:
                 "kind": "learning",
                 "text": jev.redact(prompt)[:500],
                 "payload": {"score": result.capture_candidate},
+                "session": session_id,
                 "turn_context": {
                     "session": session_id,
                     "injections": list(result.injections),
