@@ -130,9 +130,15 @@ def resolve_credential(ref: str) -> str:
     if not ref:
         raise JevError("credential_ref is empty (set env var name or op:// path in config)")
     if "://" in ref:
+        # House rule: every op call goes through the with-creds wrapper, which
+        # injects the service-account token; bare `op` has none and exits 1.
+        wrapper = "/Users/work/.local/bin/with-creds"
+        op_bin = "/opt/homebrew/bin/op"
+        argv = ([wrapper, "--env", "OP_SERVICE_ACCOUNT_TOKEN", op_bin, "read", ref]
+                if os.path.exists(wrapper) else [op_bin, "read", ref])
         try:
             proc = subprocess.run(
-                ["op", "read", ref], capture_output=True, text=True, timeout=15
+                argv, capture_output=True, text=True, timeout=20
             )
         except (OSError, subprocess.TimeoutExpired) as e:
             raise JevError(f"op read failed for credential ref ({type(e).__name__})") from e
