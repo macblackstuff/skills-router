@@ -240,11 +240,22 @@ def test_resolve_credential_op_path_uses_op_read(monkeypatch):
         captured["cmd"] = cmd
         return P()
 
+    ref = "op://vault123/item456/credential"
     monkeypatch.setattr(jev.subprocess, "run", fake_run)
-    assert (
-        resolve_credential("op://vault123/item456/credential") == "op-resolved-key"
-    )
-    assert captured["cmd"] == ["op", "read", "op://vault123/item456/credential"]
+
+    # Without the with-creds wrapper (CI machines): plain op.
+    monkeypatch.setattr(jev.os.path, "exists", lambda p: False)
+    assert resolve_credential(ref) == "op-resolved-key"
+    assert captured["cmd"] == ["/opt/homebrew/bin/op", "read", ref]
+
+    # With the wrapper (this fleet): op runs under with-creds so the
+    # service-account token is injected — bare `op` exits 1.
+    monkeypatch.setattr(jev.os.path, "exists", lambda p: p == "/Users/work/.local/bin/with-creds")
+    assert resolve_credential(ref) == "op-resolved-key"
+    assert captured["cmd"] == [
+        "/Users/work/.local/bin/with-creds", "--env", "OP_SERVICE_ACCOUNT_TOKEN",
+        "/opt/homebrew/bin/op", "read", ref,
+    ]
 
 
 # --- redaction gate ---
